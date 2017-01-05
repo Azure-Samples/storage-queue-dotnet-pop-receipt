@@ -6,11 +6,11 @@ author: seguler
 
 # Azure Storage Queue Service - Quick Sample using Pop Receipt and Face API  
 
-Azure Storage Queue Service Pop Receipt Sample - this sample demonstrates how to use the new Popreceipt functionality to coordinate updates across two non-transactional resources. In this case it allows a Blob to be published and metadata about the Blob to be written to a table entity. Prior to uploading the blob, a message is enqueued, the updates are performed to blob and table and if successful the message is deleted using its popreceipt. Any messages remaining in the queue need additional work due to the failures experienced, which can be consumed via a backend worker that is not demonstrated in this sample.    
+This sample demonstrates how to use the new Popreceipt functionality to coordinate updates across two non-transactional resources. In this case it allows a Blob to be published and metadata about the Blob to be written to a table entity. Prior to uploading the blob, a message is enqueued, the updates are performed to blob and table and if successful the message is deleted using its popreceipt. Any messages remaining in the queue need additional work due to the failures experienced, which can be consumed via a backend worker that is not demonstrated in this sample.    
 
 ## Sample App: Image Upload and Face Recognition using Face API from Azure Cognitive Services 
 
-In this sample app, we assume that the user has a number of photos in a local folder that needs to be uploaded as blobs, and using Face API each person's age in the the photos are estimated and added to a table as an entity. We will be tracking the completion of this process in a queue and a backend worker would ideally later on pick the messages from queue to go through failed processes.
+In this sample app, we assume that the user has a number of photos in a local folder that needs to be uploaded to Azure as blobs, and using Face API each person's age in the the photos are estimated and added to a table as an entity. We will be tracking the completion of this process in a queue and a backend worker would ideally later on pick the messages from queue to go through failed processes.
 
 Here is a quick walktrough of the sample:
 
