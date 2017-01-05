@@ -13,6 +13,7 @@
 // organization, product, domain name, email address, logo, person,
 // places, or events is intended or should be inferred.
 //----------------------------------------------------------------------------------
+
 namespace PopreceiptSample
 {
     using Microsoft.Azure;
@@ -22,14 +23,18 @@ namespace PopreceiptSample
     using Microsoft.WindowsAzure.Storage.Table;
     using System;
     using System.IO;
+    using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.ProjectOxford.Face;
+
     /// <summary>
-    /// Azure Queue Service Pop Receipt Sample - The Queue Service provides reliable messaging for workflow processing and for communication 
-    /// between loosely coupled components of cloud services. This sample demonstrates how to perform tasks using the pop receipt value  
-    /// returned by the service after an add message call.     
+    /// Azure Storage Queue Service Pop Receipt Sample - this sample demonstrates how to use the new Popreceipt functionality to coordinate 
+    /// updates across two non-transactional resources. In this case it allows a Blob to be published and meta-data about the Blob 
+    /// to be written to a table entity. Prior to uploading the blob, a message is enqueued, the updates are performed to blob and 
+    /// table and if successful the message is deleted using its popreceipt. Any messages remaining in the queue need additional work 
+    /// due to the failures experienced, which can be consumed via a backend worker that is not demonstrated in this sample.    
     /// 
-    /// Note: This sample uses the .NET 4.5 asynchronous programming model to demonstrate how to call the Storage Service using the 
+    /// Note: This sample uses asynchronous programming model with Task Parallel Library (TPL) to demonstrate how to call the Storage Service using the 
     /// storage client libraries asynchronous API's. When used in real applications this approach enables you to improve the 
     /// responsiveness of your application. Calls to the storage service are prefixed by the await keyword. 
     /// 
@@ -37,8 +42,9 @@ namespace PopreceiptSample
     /// - What is a Storage Account - http://azure.microsoft.com/en-us/documentation/articles/storage-whatis-account/
     /// - Getting Started with Queues - http://azure.microsoft.com/en-us/documentation/articles/storage-dotnet-how-to-use-queues/
     /// - Queue Service Concepts - http://msdn.microsoft.com/en-us/library/dd179353.aspx
-    /// - Queue Service REST API - http://msdn.microsoft.com/en-us/library/dd179363.aspx
     /// - Queue Service C# API - http://go.microsoft.com/fwlink/?LinkID=398944
+    /// - Get started with Azure Blob storage using .NET - https://docs.microsoft.com/en-us/azure/storage/storage-dotnet-how-to-use-blobs
+    /// - Get started with Azure Table storage using .NET - https://docs.microsoft.com/en-us/azure/storage/storage-dotnet-how-to-use-tables
     /// - Storage Emulator - http://msdn.microsoft.com/en-us/library/azure/hh403989.aspx
     /// - Asynchronous Programming with Async and Await  - http://msdn.microsoft.com/en-us/library/hh191443.aspx
     /// </summary>
@@ -51,7 +57,7 @@ namespace PopreceiptSample
         // To run the sample using the Storage Emulator (default option)
         //      1. Start the Azure Storage Emulator (once only) by pressing the Start button or the Windows key and searching for it
         //         by typing "Azure Storage Emulator". Select it from the list of applications to start it.
-        //      2. Create a folder named 'testfolder' and place a few photos
+        //      2. Create a folder named 'testfolder' locally (~ bin/Debug) and place a few photos
         //      3. Set breakpoints and run the project using F10. 
         // 
         // To run the sample using the Storage Service
@@ -65,24 +71,38 @@ namespace PopreceiptSample
         // *************************************************************************************************************************
         public static void Main(string[] args)
         {
-            Console.WriteLine("Azure Storage Queue Sample\n");
 
+            Console.WriteLine("Azure Storage Queue Sample demonstrating popreceipt functionality\n");
+
+            MainAsync(args).Wait();
+
+            Console.WriteLine("Press any key to exit");
+            Console.Read();
+
+        }
+
+        private static async Task MainAsync(string[] args)
+        {
+            
             // Create or reference an existing queue, container and a table 
-            CloudQueue queue = CreateQueueAsync().Result;
-            CloudBlobContainer container = CreateBlobContainerAsync().Result;
-            CloudTable table = CreateTableAsync().Result;
+            CloudQueue queue = await CreateQueueAsync();
+            CloudBlobContainer container = await CreateBlobContainerAsync();
+            CloudTable table = await CreateTableAsync();
 
             // Face API Client
             FaceServiceClient faceClient = new FaceServiceClient(CloudConfigurationManager.GetSetting("FaceAPIKey"));
 
-            // Process images to a blob account and save the estimated age as an entity in the table. Delete the messages in the queue using popreceipt
-            processImage(queue, container, table, faceClient).Wait();
-
-            // clean up the created queue, blobs and table
-            cleanup(queue, container, table).Wait();
-
-            Console.WriteLine("Press any key to exit");
-            Console.Read();
+            try
+            {
+                // Process images to a blob account and save the estimated age as an entity in the table. Delete the messages in the queue using popreceipt
+                await ProcessImages(queue, container, table, faceClient);
+            }
+            finally
+            {
+                // Clean up resources created by this sample. 
+                await Cleanup(queue, container, table);
+            }
+            
         }
 
         /// <summary>
@@ -95,15 +115,12 @@ namespace PopreceiptSample
         /// <param name="container">The sample blob container</param>
         /// <param name="table">The sample table</param>
         /// <param name="faceClient">Face API client</param>
-        /// <returns></returns>
-        public static async Task processImage(CloudQueue queue, CloudBlobContainer container, CloudTable table, FaceServiceClient faceClient)
+        /// <returns>A task representing the asynchronous operation</returns>
+        private static async Task ProcessImages(CloudQueue queue, CloudBlobContainer container, CloudTable table, FaceServiceClient faceClient)
         {
-
-            Console.WriteLine("\n** Advanced sample starting...\n");
 
             try
             {
-
                 // Iterate over photos in 'testfolder'
                 var images = Directory.EnumerateFiles("testfolder", "*.jpg");
 
@@ -114,30 +131,40 @@ namespace PopreceiptSample
 
                     Console.WriteLine("Processing image {0}", fileName);
 
-                    // add a message to the queue for each photo
+                    // Add a message to the queue for each photo. Note the visibility timeout
+                    // as blob and table operations in the following process may take up to 900 seconds.
+                    // For simplicity, other factors like FaceAPI call timeout are ignored.
+                    // After the 900 seconds, the message will be visible and a worker role can pick up 
+                    // the message from queue for cleanup. Default time to live for the message is 7 days.
                     CloudQueueMessage message = new CloudQueueMessage(fileName);
-                    queue.AddMessage(message, null, TimeSpan.FromSeconds(120));
+                    queue.AddMessage(message, null, TimeSpan.FromSeconds(900));
 
                     // read the file
                     using (var fileStream = File.OpenRead(currentFile))
                     {
 
                         // detect face and estimate the age
-                        var faces = await faceClient.DetectAsync(fileStream, false, true, new FaceAttributeType[] { FaceAttributeType.Age });
-                        Console.WriteLine(" > " + faces.Length + " face(s) detected.");
+                        var faces = await faceClient.DetectAsync(fileStream, false, true, 
+                            new FaceAttributeType[] {FaceAttributeType.Age});
+                        Console.WriteLine(faces.Length + " face(s) detected in " + fileName);
 
                         CloudBlockBlob blob = container.GetBlockBlobReference(fileName);
 
-                        var tableEntity = new DynamicTableEntity(DateTime.Now.ToString("yyMMdd"), fileName);
+                        var tableEntity = new DynamicTableEntity("FaceImages", fileName);
 
                         // iterate over detected faces
                         int i = 1;
                         foreach (var face in faces)
                         {
 
-                            // Append the age info as property in the table entity
-                            tableEntity.Properties.Add("person" + i.ToString(), new EntityProperty(face.FaceAttributes.Age.ToString()));
+                            // append the age info as property in the table entity
+                            tableEntity.Properties.Add("person" + i.ToString(),
+                                new EntityProperty(face.FaceAttributes.Age.ToString()));
                             i++;
+
+                            // ignore if more than 250 faces were found. An entity can contain up to 252 properties.
+                            if (i > 250)
+                                break;
 
                         }
 
@@ -148,17 +175,14 @@ namespace PopreceiptSample
                         // store the age info in the table
                         table.Execute(TableOperation.InsertOrReplace(tableEntity));
 
-                        // If blob and the entity exist, delete the queue message with the pop receipt
-                        if (blob.Exists() && table.Execute(TableOperation.Retrieve(DateTime.Now.ToString("yyMMdd"), fileName)).HttpStatusCode == 200) { 
+                        // delete the queue message with the pop receipt if previous operations completed successfully
+                        if (blob.Exists() && table.Execute(TableOperation.Retrieve("FaceImages", fileName)).HttpStatusCode == 200)
                             await queue.DeleteMessageAsync(message.Id, message.PopReceipt);
-                        } else
-                        {
-                            await queue.UpdateMessageAsync(message, TimeSpan.FromSeconds(0), MessageUpdateFields.Visibility);
-                        }
 
                     }
 
                 }
+
             }
             catch (StorageException ex)
             {
@@ -171,6 +195,10 @@ namespace PopreceiptSample
             catch (Exception ex)
             {
                 Console.WriteLine("Exception: " + ex.Message);
+
+                if(ex is DirectoryNotFoundException || ex is FileNotFoundException)
+                    Console.WriteLine("Please make sure that the folder \"testfolder\" (with images) is present in the current directory where the sample is running");
+
             }
 
         }
@@ -184,11 +212,13 @@ namespace PopreceiptSample
             // Retrieve storage account information from connection string.
             CloudStorageAccount storageAccount = CloudStorageAccount.Parse(CloudConfigurationManager.GetSetting("StorageConnectionString"));
 
-            // Create a queue client for interacting with the queue service
+            // Create a blob client for interacting with the blob service
             CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
 
+            // Get a reference to the container
             Console.WriteLine("Creating a container for the demo");
             CloudBlobContainer container = blobClient.GetContainerReference("samplecontainer");
+
             try
             {
                 await container.CreateIfNotExistsAsync();
@@ -196,7 +226,6 @@ namespace PopreceiptSample
             catch (StorageException ex)
             {
                 Console.WriteLine("Error: " + ex.RequestInformation.ExtendedErrorInformation.ErrorCode + ex.RequestInformation.ExtendedErrorInformation.ErrorMessage);
-                Console.ReadLine();
                 throw;
             }
 
@@ -224,7 +253,6 @@ namespace PopreceiptSample
             catch (StorageException ex)
             {
                 Console.WriteLine("Error: " + ex.RequestInformation.ExtendedErrorInformation.ErrorCode + ex.RequestInformation.ExtendedErrorInformation.ErrorMessage);
-                Console.ReadLine();
                 throw;
             }
 
@@ -240,7 +268,7 @@ namespace PopreceiptSample
             // Retrieve storage account information from connection string.
             CloudStorageAccount storageAccount = CloudStorageAccount.Parse(CloudConfigurationManager.GetSetting("StorageConnectionString"));
 
-            // Create a table client for interacting with the queue service
+            // Create a table client for interacting with the table service
             CloudTableClient tableClient = storageAccount.CreateCloudTableClient();
 
             Console.WriteLine("Creating a table for the demo");
@@ -252,7 +280,6 @@ namespace PopreceiptSample
             catch (StorageException ex)
             {
                 Console.WriteLine("Error: " + ex.RequestInformation.ExtendedErrorInformation.ErrorCode + ex.RequestInformation.ExtendedErrorInformation.ErrorMessage);
-                Console.ReadLine();
                 throw;
             }
 
@@ -260,28 +287,21 @@ namespace PopreceiptSample
         }
 
         /// <summary>
-        /// Uploads all the images that reside in 'testfolder' and then adds
-        /// the age of the person as a metadata after calling the Face API.
-        /// Once done, the message gets deleted from the queue
+        /// Cleans up all the created service resources by this sample
         /// </summary>
         /// <param name="queue">The sample queue</param>
         /// <param name="container">The sample blob container</param>
         /// <param name="table">The sample table</param>
-        /// <returns></returns>
-        private static async Task cleanup(CloudQueue queue, CloudBlobContainer container, CloudTable table)
+        /// <returns>A task representing the asynchronous operation</returns>
+        private static async Task Cleanup(CloudQueue queue, CloudBlobContainer container, CloudTable table)
         {
 
+            Console.WriteLine("Cleaning up the queue, table and the blobs created");
+
+            // Clean up the queue
             try
             {
-
-                Console.WriteLine("Cleaning up the queue, table and the blobs created");
-
                 await queue.DeleteIfExistsAsync();
-
-                await container.DeleteIfExistsAsync();
-
-                await table.DeleteIfExistsAsync();
-               
             }
             catch (StorageException ex)
             {
@@ -290,7 +310,34 @@ namespace PopreceiptSample
             catch (Exception ex)
             {
                 Console.WriteLine("Exception: " + ex.Message);
-                Console.ReadLine();
+            }
+
+            // Clean up the container
+            try
+            {
+                await container.DeleteIfExistsAsync();
+            }
+            catch (StorageException ex)
+            {
+                Console.WriteLine("Storage error: " + ex.RequestInformation.ExtendedErrorInformation.ErrorCode);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception: " + ex.Message);
+            }
+
+            // Clean up the table
+            try
+            {
+                await table.DeleteIfExistsAsync();
+            }
+            catch (StorageException ex)
+            {
+                Console.WriteLine("Storage error: " + ex.RequestInformation.ExtendedErrorInformation.ErrorCode);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception: " + ex.Message);
             }
 
         }
