@@ -58,4 +58,3 @@ This sample can be run using either the Azure Storage Emulator that installs as 
 [Queue Service REST API Reference](https://docs.microsoft.com/en-us/rest/api/storageservices/fileservices/queue-service-rest-api)
 
 [Azure Storage Queue Service Samples] (https://azure.microsoft.com/en-us/resources/samples/?service=storage&term=queue)
-"# storage-queue-dotnet-pop-receipt" 
