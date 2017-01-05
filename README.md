@@ -10,6 +10,8 @@ Azure Storage Queue Service Pop Receipt Sample - this sample demonstrates how to
 
 ## Sample App: Image Upload and Face Recognition using Face API from Azure Cognitive Services 
 
+In this sample app, we assume that the user has a number of photos in a local folder that needs to be uploaded as blobs, and using Face API each person's age in the the photos are estimated and added to a table as an entity. We will be tracking the completion of this process in a queue and a backend worker would ideally later on pick the messages from queue to go through failed processes.
+
 Here is a quick walktrough of the sample:
 
 1. Create the queue if not created already
@@ -21,7 +23,7 @@ Here is a quick walktrough of the sample:
 7. Call the Face API to estimate the age of each person in the photo.
 8. Store the age information as an entity in the table.
 9. Upload the image to a blob if at least one face is detected.
-10.If both the blob and the table entity operation succeeded, delete the message from queue using the pop receipt.
+10. If both the blob and the table entity operation succeeded, delete the message from queue using the pop receipt.
 
 Note: This sample uses asynchronous programming model with Task Parallel Library (TPL) to demonstrate how to call the Storage Service using the storage client libraries asynchronous API's. When used in real applications this approach enables you to improve the responsiveness of your application. Calls to the storage service are prefixed by the await keyword. 
 
