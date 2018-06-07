@@ -49,12 +49,12 @@ This sample can be run using either the Azure Storage Emulator that installs as 
 
 ## More information
 
-[What is a Storage Account](http://azure.microsoft.com/en-us/documentation/articles/storage-whatis-account/)
+[What is a Storage Account](https://docs.microsoft.com/en-us/azure/storage/common/storage-create-storage-account)
 
-[Cognitive Services Face API](https://www.microsoft.com/cognitive-services/en-us/face-api)
+[Cognitive Services Face API](https://azure.microsoft.com/en-us/services/cognitive-services/face/)
 
-[Get started with Azure Queue storage using .NET] (https://docs.microsoft.com/en-us/azure/storage/storage-dotnet-how-to-use-queues)
+[Get started with Azure Queue storage using .NET](https://docs.microsoft.com/en-us/azure/storage/storage-dotnet-how-to-use-queues)
 
 [Queue Service REST API Reference](https://docs.microsoft.com/en-us/rest/api/storageservices/fileservices/queue-service-rest-api)
 
-[Azure Storage Queue Service Samples] (https://azure.microsoft.com/en-us/resources/samples/?service=storage&term=queue)
+[Azure Storage Queue Service Samples](https://azure.microsoft.com/en-us/resources/samples/?service=storage&term=queue)
