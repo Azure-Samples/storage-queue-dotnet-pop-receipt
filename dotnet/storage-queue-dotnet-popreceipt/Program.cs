@@ -90,7 +90,8 @@ namespace PopreceiptSample
             CloudTable table = await CreateTableAsync();
 
             // Face API Client
-            FaceServiceClient faceClient = new FaceServiceClient(CloudConfigurationManager.GetSetting("FaceAPIKey"));
+            // Add your Face subscription key to your environment variables
+            FaceServiceClient faceClient = new FaceServiceClient(CloudConfigurationManager.GetSetting(Environment.GetEnvironmentVariable("FACE_SUBSCRIPTION_KEY")));
 
             try
             {
